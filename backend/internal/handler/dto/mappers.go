@@ -206,7 +206,6 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		Type:                    a.Type,
 		Credentials:             a.Credentials,
 		Extra:                   a.Extra,
-		ProxyID:                 a.ProxyID,
 		Concurrency:             a.Concurrency,
 		LoadFactor:              a.LoadFactor,
 		Priority:                a.Priority,
@@ -228,6 +227,9 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		SessionWindowEnd:        a.SessionWindowEnd,
 		SessionWindowStatus:     a.SessionWindowStatus,
 		GroupIDs:                a.GroupIDs,
+	}
+	if !service.ShouldHideProxyInfoForAccount(a) {
+		out.ProxyID = a.ProxyID
 	}
 
 	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
@@ -364,7 +366,9 @@ func AccountFromService(a *service.Account) *Account {
 		return nil
 	}
 	out := AccountFromServiceShallow(a)
-	out.Proxy = ProxyFromService(a.Proxy)
+	if !service.ShouldHideProxyInfoForAccount(a) {
+		out.Proxy = ProxyFromService(a.Proxy)
+	}
 	if len(a.AccountGroups) > 0 {
 		out.AccountGroups = make([]AccountGroup, 0, len(a.AccountGroups))
 		for i := range a.AccountGroups {

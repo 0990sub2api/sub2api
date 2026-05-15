@@ -91,7 +91,6 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 		response.BadRequest(c, err.Error())
 		return
 	}
-
 	accounts, err := h.resolveExportAccounts(ctx, selectedIDs, c)
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -102,6 +101,9 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	if err != nil {
 		response.BadRequest(c, err.Error())
 		return
+	}
+	if service.IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		includeProxies = false
 	}
 
 	var proxies []service.Proxy
@@ -137,7 +139,7 @@ func (h *AccountHandler) ExportData(c *gin.Context) {
 	for i := range accounts {
 		acc := accounts[i]
 		var proxyKey *string
-		if acc.ProxyID != nil {
+		if acc.ProxyID != nil && !service.ShouldHideProxyInfoForAccount(&acc) {
 			if key, ok := proxyKeyByID[*acc.ProxyID]; ok {
 				proxyKey = &key
 			}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -638,6 +639,8 @@ type GatewayConfig struct {
 	// OpenAIPassthroughAllowTimeoutHeaders: OpenAI 透传模式是否放行客户端超时头
 	// 关闭（默认）可避免 x-stainless-timeout 等头导致上游提前断流。
 	OpenAIPassthroughAllowTimeoutHeaders bool `mapstructure:"openai_passthrough_allow_timeout_headers"`
+	// ForcedOpenAIOAuthSocks5Proxy is loaded only from FORCED_OPENAI_OAUTH_SOCKS5_* env vars.
+	ForcedOpenAIOAuthSocks5Proxy ForcedOpenAIOAuthSocks5ProxyConfig `mapstructure:"-"`
 	// OpenAIWS: OpenAI Responses WebSocket 配置（默认开启，可按需回滚到 HTTP）
 	OpenAIWS GatewayOpenAIWSConfig `mapstructure:"openai_ws"`
 	// ImageConcurrency: 图片生成独立并发限制配置（默认关闭）
@@ -716,6 +719,51 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+}
+
+type ForcedOpenAIOAuthSocks5ProxyConfig struct {
+	Enabled  bool
+	Host     string
+	Port     int
+	Password string
+}
+
+func ForcedOpenAIOAuthSocks5ProxyFromEnv() (ForcedOpenAIOAuthSocks5ProxyConfig, error) {
+	enabled, err := parseBoolEnv("FORCED_OPENAI_OAUTH_SOCKS5_ENABLED")
+	if err != nil {
+		return ForcedOpenAIOAuthSocks5ProxyConfig{}, err
+	}
+	cfg := ForcedOpenAIOAuthSocks5ProxyConfig{
+		Enabled:  enabled,
+		Host:     strings.TrimSpace(os.Getenv("FORCED_OPENAI_OAUTH_SOCKS5_HOST")),
+		Password: strings.TrimSpace(os.Getenv("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD")),
+	}
+	portValue := strings.TrimSpace(os.Getenv("FORCED_OPENAI_OAUTH_SOCKS5_PORT"))
+	if portValue != "" {
+		port, err := strconv.Atoi(portValue)
+		if err != nil {
+			return ForcedOpenAIOAuthSocks5ProxyConfig{}, fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PORT must be an integer")
+		}
+		cfg.Port = port
+	}
+	return cfg, nil
+}
+
+func IsForcedOpenAIOAuthSocks5ProxyEnabledFromEnv() bool {
+	cfg, err := ForcedOpenAIOAuthSocks5ProxyFromEnv()
+	return err == nil && cfg.Enabled
+}
+
+func parseBoolEnv(name string) (bool, error) {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	switch value {
+	case "", "0", "false", "f", "no", "n", "off":
+		return false, nil
+	case "1", "true", "t", "yes", "y", "on":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s must be a boolean", name)
+	}
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -1275,6 +1323,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config error: %w", err)
 	}
+	forcedOpenAIOAuthSocks5Proxy, err := ForcedOpenAIOAuthSocks5ProxyFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Gateway.ForcedOpenAIOAuthSocks5Proxy = forcedOpenAIOAuthSocks5Proxy
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
@@ -2280,6 +2333,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
+	}
+	if c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Enabled {
+		if strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Host) == "" {
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_HOST is required when forced OpenAI OAuth SOCKS5 proxy is enabled")
+		}
+		if c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Port <= 0 || c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Port > 65535 {
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PORT must be between 1 and 65535 when forced OpenAI OAuth SOCKS5 proxy is enabled")
+		}
+		if strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Password) == "" {
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD is required when forced OpenAI OAuth SOCKS5 proxy is enabled")
+		}
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
 		switch c.Gateway.ConnectionPoolIsolation {

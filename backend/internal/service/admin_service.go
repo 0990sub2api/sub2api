@@ -2414,6 +2414,9 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 		account.LoadFactor = input.LoadFactor
 	}
+	if err := s.bindForcedOpenAIOAuthSocks5ProxyIfNeeded(ctx, account, false); err != nil {
+		return nil, err
+	}
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
@@ -2499,7 +2502,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 		ComputeQuotaResetAt(account.Extra)
 	}
-	if input.ProxyID != nil {
+	if input.ProxyID != nil && !account.IsOpenAIOAuth() {
 		// 0 表示清除代理（前端发送 0 而不是 null 来表达清除意图）
 		if *input.ProxyID == 0 {
 			account.ProxyID = nil
@@ -2544,6 +2547,9 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	}
 	if input.AutoPauseOnExpired != nil {
 		account.AutoPauseOnExpired = *input.AutoPauseOnExpired
+	}
+	if err := s.bindForcedOpenAIOAuthSocks5ProxyIfNeeded(ctx, account, false); err != nil {
+		return nil, err
 	}
 
 	// 先验证分组是否存在（在任何写操作之前）
@@ -2609,16 +2615,21 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 
 	// 预加载账号平台信息（混合渠道检查需要）。
 	platformByID := map[int64]string{}
-	if needMixedChannelCheck {
+	preloadedAccounts := []*Account(nil)
+	if needMixedChannelCheck || IsForcedOpenAIOAuthSocks5ProxyEnabled() {
 		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
 		}
+		preloadedAccounts = accounts
 		for _, account := range accounts {
 			if account != nil {
 				platformByID[account.ID] = account.Platform
 			}
 		}
+	}
+	if err := validateBulkForcedOpenAIOAuthSocks5ProxyAccounts(input, preloadedAccounts); err != nil {
+		return nil, err
 	}
 
 	// 预检查混合渠道风险：在任何写操作之前，若发现风险立即返回错误。
@@ -2679,6 +2690,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// Run bulk update for column/jsonb fields first.
 	if _, err := s.accountRepo.BulkUpdate(ctx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
+	}
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		accounts, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, account := range accounts {
+			if account == nil || !account.IsOpenAIOAuth() {
+				continue
+			}
+			if err := s.bindForcedOpenAIOAuthSocks5ProxyIfNeeded(ctx, account, true); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Handle group bindings per account (requires individual operations).
@@ -2806,6 +2831,9 @@ func (s *adminServiceImpl) SetAccountSchedulable(ctx context.Context, id int64, 
 
 // Proxy management implementations
 func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]Proxy, int64, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []Proxy{}, 0, nil
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	proxies, result, err := s.proxyRepo.ListWithFilters(ctx, params, protocol, status, search)
 	if err != nil {
@@ -2815,6 +2843,9 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 }
 
 func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page, pageSize int, protocol, status, search string, sortBy, sortOrder string) ([]ProxyWithAccountCount, int64, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []ProxyWithAccountCount{}, 0, nil
+	}
 	params := pagination.PaginationParams{Page: page, PageSize: pageSize, SortBy: sortBy, SortOrder: sortOrder}
 	proxies, result, err := s.proxyRepo.ListWithFiltersAndAccountCount(ctx, params, protocol, status, search)
 	if err != nil {
@@ -2825,10 +2856,16 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 }
 
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []Proxy{}, nil
+	}
 	return s.proxyRepo.ListActive(ctx)
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []ProxyWithAccountCount{}, nil
+	}
 	proxies, err := s.proxyRepo.ListActiveWithAccountCount(ctx)
 	if err != nil {
 		return nil, err
@@ -2838,14 +2875,23 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 }
 
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, ErrProxyNotFound
+	}
 	return s.proxyRepo.GetByID(ctx, id)
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []Proxy{}, nil
+	}
 	return s.proxyRepo.ListByIDs(ctx, ids)
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, infraerrors.BadRequest("PROXY_MANAGEMENT_DISABLED", "proxy management is disabled")
+	}
 	proxy := &Proxy{
 		Name:     input.Name,
 		Protocol: input.Protocol,
@@ -2864,6 +2910,9 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 }
 
 func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *UpdateProxyInput) (*Proxy, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, infraerrors.BadRequest("PROXY_MANAGEMENT_DISABLED", "proxy management is disabled")
+	}
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -2898,6 +2947,9 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return infraerrors.BadRequest("PROXY_MANAGEMENT_DISABLED", "proxy management is disabled")
+	}
 	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
 	if err != nil {
 		return err
@@ -2909,6 +2961,9 @@ func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
 }
 
 func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) (*ProxyBatchDeleteResult, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, infraerrors.BadRequest("PROXY_MANAGEMENT_DISABLED", "proxy management is disabled")
+	}
 	result := &ProxyBatchDeleteResult{}
 	if len(ids) == 0 {
 		return result, nil
@@ -2944,10 +2999,16 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 }
 
 func (s *adminServiceImpl) GetProxyAccounts(ctx context.Context, proxyID int64) ([]ProxyAccountSummary, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return []ProxyAccountSummary{}, nil
+	}
 	return s.proxyRepo.ListAccountSummariesByProxyID(ctx, proxyID)
 }
 
 func (s *adminServiceImpl) CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return false, nil
+	}
 	return s.proxyRepo.ExistsByHostPortAuth(ctx, host, port, username, password)
 }
 
@@ -3036,6 +3097,9 @@ func (s *adminServiceImpl) ExpireRedeemCode(ctx context.Context, id int64) (*Red
 }
 
 func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestResult, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, ErrProxyNotFound
+	}
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -3080,6 +3144,9 @@ func (s *adminServiceImpl) TestProxy(ctx context.Context, id int64) (*ProxyTestR
 }
 
 func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error) {
+	if IsForcedOpenAIOAuthSocks5ProxyEnabled() {
+		return nil, ErrProxyNotFound
+	}
 	proxy, err := s.proxyRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
