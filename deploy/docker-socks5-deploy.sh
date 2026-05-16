@@ -47,6 +47,10 @@ generate_secret() {
     openssl rand -hex 32
 }
 
+generate_admin_password() {
+    openssl rand -base64 32 | tr -dc 'A-Za-z0-9' | head -c 10
+}
+
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -137,7 +141,7 @@ main() {
     JWT_SECRET=$(generate_secret)
     TOTP_ENCRYPTION_KEY=$(generate_secret)
     POSTGRES_PASSWORD=$(generate_secret)
-    ADMIN_PASSWORD=$(generate_secret)
+    ADMIN_PASSWORD=$(generate_admin_password)
     SUB2API_IMAGE_ESCAPED=$(escape_sed_replacement "${SUB2API_IMAGE}")
     SERVER_PORT_ESCAPED=$(escape_sed_replacement "${SERVER_PORT}")
     FORCED_OPENAI_OAUTH_SOCKS5_HOST_ESCAPED=$(escape_sed_replacement "${FORCED_OPENAI_OAUTH_SOCKS5_HOST}")
