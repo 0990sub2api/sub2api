@@ -13,7 +13,7 @@ import (
 const forcedOpenAIOAuthSocks5ProxyProtocol = "socks5"
 
 func IsForcedOpenAIOAuthSocks5ProxyEnabled() bool {
-	return config.IsForcedOpenAIOAuthSocks5ProxyEnabledFromEnv()
+	return true
 }
 
 func ShouldHideProxyInfoForAccount(account *Account) bool {
@@ -40,9 +40,6 @@ func (s *adminServiceImpl) resolveForcedOpenAIOAuthSocks5Proxy(ctx context.Conte
 	cfg, err := config.ForcedOpenAIOAuthSocks5ProxyFromEnv()
 	if err != nil {
 		return nil, nil, err
-	}
-	if !cfg.Enabled {
-		return nil, nil, nil
 	}
 	if err := validateForcedOpenAIOAuthSocks5ProxyAccount(cfg, account); err != nil {
 		return nil, nil, err
@@ -87,7 +84,7 @@ func (s *adminServiceImpl) resolveForcedOpenAIOAuthSocks5Proxy(ctx context.Conte
 }
 
 func validateForcedOpenAIOAuthSocks5ProxyAccount(cfg config.ForcedOpenAIOAuthSocks5ProxyConfig, account *Account) error {
-	if account == nil || !account.IsOpenAIOAuth() || !cfg.Enabled {
+	if account == nil || !account.IsOpenAIOAuth() {
 		return nil
 	}
 	if strings.TrimSpace(account.GetChatGPTAccountID()) == "" {
@@ -109,9 +106,6 @@ func validateBulkForcedOpenAIOAuthSocks5ProxyAccounts(input *BulkUpdateAccountsI
 	cfg, err := config.ForcedOpenAIOAuthSocks5ProxyFromEnv()
 	if err != nil {
 		return err
-	}
-	if !cfg.Enabled {
-		return nil
 	}
 	for _, account := range accounts {
 		if account == nil || !account.IsOpenAIOAuth() {

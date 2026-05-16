@@ -62,7 +62,6 @@ func (s *forcedProxyRepoStub) ListAccountSummariesByProxyID(context.Context, int
 }
 
 func setForcedOpenAIOAuthSocks5ProxyEnv(t *testing.T) {
-	t.Setenv("FORCED_OPENAI_OAUTH_SOCKS5_ENABLED", "true")
 	t.Setenv("FORCED_OPENAI_OAUTH_SOCKS5_HOST", "proxy.internal")
 	t.Setenv("FORCED_OPENAI_OAUTH_SOCKS5_PORT", "1080")
 	t.Setenv("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD", "secret")

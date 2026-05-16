@@ -722,19 +722,13 @@ type GatewayConfig struct {
 }
 
 type ForcedOpenAIOAuthSocks5ProxyConfig struct {
-	Enabled  bool
 	Host     string
 	Port     int
 	Password string
 }
 
 func ForcedOpenAIOAuthSocks5ProxyFromEnv() (ForcedOpenAIOAuthSocks5ProxyConfig, error) {
-	enabled, err := parseBoolEnv("FORCED_OPENAI_OAUTH_SOCKS5_ENABLED")
-	if err != nil {
-		return ForcedOpenAIOAuthSocks5ProxyConfig{}, err
-	}
 	cfg := ForcedOpenAIOAuthSocks5ProxyConfig{
-		Enabled:  enabled,
 		Host:     strings.TrimSpace(os.Getenv("FORCED_OPENAI_OAUTH_SOCKS5_HOST")),
 		Password: strings.TrimSpace(os.Getenv("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD")),
 	}
@@ -747,23 +741,6 @@ func ForcedOpenAIOAuthSocks5ProxyFromEnv() (ForcedOpenAIOAuthSocks5ProxyConfig, 
 		cfg.Port = port
 	}
 	return cfg, nil
-}
-
-func IsForcedOpenAIOAuthSocks5ProxyEnabledFromEnv() bool {
-	cfg, err := ForcedOpenAIOAuthSocks5ProxyFromEnv()
-	return err == nil && cfg.Enabled
-}
-
-func parseBoolEnv(name string) (bool, error) {
-	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	switch value {
-	case "", "0", "false", "f", "no", "n", "off":
-		return false, nil
-	case "1", "true", "t", "yes", "y", "on":
-		return true, nil
-	default:
-		return false, fmt.Errorf("%s must be a boolean", name)
-	}
 }
 
 // UserMessageQueueConfig 用户消息串行队列配置
@@ -2334,15 +2311,17 @@ func (c *Config) Validate() error {
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
 	}
-	if c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Enabled {
+	if strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Host) != "" ||
+		c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Port != 0 ||
+		strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Password) != "" {
 		if strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Host) == "" {
-			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_HOST is required when forced OpenAI OAuth SOCKS5 proxy is enabled")
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_HOST is required")
 		}
 		if c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Port <= 0 || c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Port > 65535 {
-			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PORT must be between 1 and 65535 when forced OpenAI OAuth SOCKS5 proxy is enabled")
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PORT must be between 1 and 65535")
 		}
 		if strings.TrimSpace(c.Gateway.ForcedOpenAIOAuthSocks5Proxy.Password) == "" {
-			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD is required when forced OpenAI OAuth SOCKS5 proxy is enabled")
+			return fmt.Errorf("FORCED_OPENAI_OAUTH_SOCKS5_PASSWORD is required")
 		}
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
