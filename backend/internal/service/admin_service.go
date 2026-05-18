@@ -556,7 +556,7 @@ func NewAdminService(
 	userSubRepo UserSubscriptionRepository,
 	privacyClientFactory PrivacyClientFactory,
 ) AdminService {
-	return &adminServiceImpl{
+	svc := &adminServiceImpl{
 		userRepo:             userRepo,
 		groupRepo:            groupRepo,
 		accountRepo:          accountRepo,
@@ -575,6 +575,8 @@ func NewAdminService(
 		userSubRepo:          userSubRepo,
 		privacyClientFactory: privacyClientFactory,
 	}
+	svc.probeOpenAIOAuthSocks5OnStartup()
+	return svc
 }
 
 // User management implementations
@@ -2420,6 +2422,7 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
+	s.probeOpenAIOAuthSocks5Async(account, "account_import")
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
